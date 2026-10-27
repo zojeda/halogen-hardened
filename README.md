@@ -25,8 +25,31 @@ behind the same port; a request picks one by its `model`
 
 Any other `model` goes to Qwen3.8-Flash-Next, as before.
 
-If you want an AI coding agent to install and run it for you, point it at
-[`AGENTS.md`](AGENTS.md) (Claude Code loads it through `CLAUDE.md`).
+<details>
+<summary><b>Installing with an AI agent (Claude Code, Codex, Cursor, …)</b></summary>
+
+Paste this prompt into your coding agent:
+
+```text
+Install and start the isolated Halogen Flash Server from
+https://github.com/zojeda/halogen-hardened on this machine.
+Clone the repo, then follow AGENTS.md step by step:
+https://raw.githubusercontent.com/zojeda/halogen-hardened/main/AGENTS.md
+Do not weaken any isolation setting to get past an error; report it instead.
+Ask me before anything that needs sudo, and stop if the model weights are missing.
+```
+
+What the agent will do (full procedure in [`AGENTS.md`](AGENTS.md); Claude Code loads
+it automatically through `CLAUDE.md`):
+
+1. Check podman, quadlet, the GPU/NPU device nodes, groups, RAM and disk.
+2. Check that the model weights are in `~/halogen-models` (it cannot download them).
+3. Run `./halogen-fetch-xrt.sh` and `./halogen-fetch-npu.sh`.
+4. Ask you to run `sudo ./host/halogen-host-setup.sh` in a host terminal, then confirm it.
+5. Run `./install.sh` and wait for the API on `127.0.0.1:8731`.
+6. Run the checks in "6. Verify", including that the server has no egress.
+
+</details>
 
 ## Isolation measures
 
