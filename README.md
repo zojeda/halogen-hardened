@@ -25,6 +25,9 @@ behind the same port; a request picks one by its `model`
 
 Any other `model` goes to Qwen3.8-Flash-Next, as before.
 
+If you want an AI coding agent to install and run it for you, point it at
+[`AGENTS.md`](AGENTS.md) (Claude Code loads it through `CLAUDE.md`).
+
 ## Isolation measures
 
 - `Internal=true` network: no egress anywhere; only the proxy talks to it.
