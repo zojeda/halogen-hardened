@@ -1,0 +1,84 @@
+[Unit]
+Description=Halogen Flash Server (Qwen3.8-Flash-Next + NPU models) - isolated
+Wants=network-online.target halogen-proxy.service
+After=network-online.target
+# GPU and NPU together are only safe with the fabric clock held: the system unit
+# halogen-fabric-clock.service (host/) does it. Without it, the server refuses to start.
+
+[Container]
+# 0.18.16 pinned by digest (published 2026-10-25 19:23 UTC)
+Image=ghcr.io/peonist-ai/halogen-flash-server@sha256:fee7d5bb7ff02c78c60224da931e3c70a160dc48779bf5f7ba1030c97c8ac2d1
+ContainerName=halogen
+# No egress to the internet/VPN/LAN; the proxy reaches it through this alias
+Network=halogen-int.network
+NetworkAlias=halogen-backend
+# No PublishPort: halogen-proxy publishes it on 127.0.0.1
+
+# GPU: only the render node, not the cardN (display) nodes
+AddDevice=/dev/kfd
+AddDevice=/dev/dri/renderD128
+# NPU (needs the dri_device_t SELinux label, see host/halogen-host-setup.sh)
+AddDevice=/dev/accel/accel0
+# No keep-groups (incompatible with UserNS=nomap): the three nodes must be 0666 on the host
+# (check with: ls -l /dev/kfd /dev/dri/renderD128 /dev/accel/accel0)
+# The NPU reads the models from pinned (non-swappable) memory
+Ulimit=memlock=-1:-1
+
+# NPU models (in /models/npu, fetched with halogen-fetch-npu.sh; without HALOGEN_DOWNLOAD
+# the container opens no outbound connections). Every file is checked by sha256 at start.
+#   decider-0.8b          decisions (/v1/chat/completions with json_schema, /v1/systemone)
+#   qwen3-embedding-0.6b  embeddings (/v1/embeddings)
+#   qwen3-reranker-0.6b   reranking  (/v1/rerank)
+#   qwen3-asr-1.7b        speech to text (/v1/audio/transcriptions)
+#   qwen3-tts-1.7b-customvoice  text to speech (/v1/audio/speech)
+# If you change the list, run halogen-fetch-npu.sh again before restarting.
+Environment=HALOGEN_NPU_MODELS=decider-0.8b,qwen3-embedding-0.6b,qwen3-reranker-0.6b,qwen3-asr-1.7b,qwen3-tts-1.7b-customvoice
+# KV pool halved (524288 by default, ~14.9 GiB): leaves ~7.4 GiB for the NPU models.
+# Each request can still reach 262144 tokens; the total across concurrent requests drops.
+Environment=HALOGEN_KV_POOL_POSITIONS=262144
+
+# XRT 2.25 + NPU plugin from Debian trixie-backports (halogen-fetch-xrt.sh). Each library
+# is mounted where the image looks for XRT and at the paths they load each other from.
+Volume=%h/halogen-xrt/lib/libxrt_coreutil.so.2:/opt/xilinx/xrt/lib/libxrt_coreutil.so.2:ro
+Volume=%h/halogen-xrt/lib/libxrt_core.so.2:/opt/xilinx/xrt/lib/libxrt_core.so.2:ro
+Volume=%h/halogen-xrt/lib/libxrt_driver_xdna.so.2:/opt/xilinx/xrt/lib/libxrt_driver_xdna.so.2:ro
+Volume=%h/halogen-xrt/lib/libxrt_coreutil.so.2:/usr/lib/x86_64-linux-gnu/libxrt_coreutil.so.2:ro
+Volume=%h/halogen-xrt/lib/libxrt_core.so.2:/usr/lib/x86_64-linux-gnu/libxrt_core.so.2:ro
+Volume=%h/halogen-xrt/lib/libxrt_driver_xdna.so.2:/usr/lib/x86_64-linux-gnu/libxrt_driver_xdna.so.2:ro
+# Debian's XRT derives its root by stripping lib/x86_64-linux-gnu from where coreutil was loaded
+# (/opt/xilinx/xrt/lib -> /opt/xilinx) and looks for core and the plugin in /opt/xilinx/lib/x86_64-linux-gnu
+Volume=%h/halogen-xrt/lib/libxrt_coreutil.so.2:/opt/xilinx/lib/x86_64-linux-gnu/libxrt_coreutil.so.2:ro
+Volume=%h/halogen-xrt/lib/libxrt_core.so.2:/opt/xilinx/lib/x86_64-linux-gnu/libxrt_core.so.2:ro
+Volume=%h/halogen-xrt/lib/libxrt_driver_xdna.so.2:/opt/xilinx/lib/x86_64-linux-gnu/libxrt_driver_xdna.so.2:ro
+
+# Filesystem
+Volume=%h/halogen-models:/models:ro
+ReadOnly=true
+Tmpfs=/tmp
+
+# Privileges
+NoNewPrivileges=true
+DropCapability=ALL
+# Your UID is not mapped: container root is your first subUID (/etc/subuid), not your
+# user. An escape cannot read your home or your 0600 IPC/shm objects. UserNS=auto would be
+# better, but it fails when other containers (e.g. toolbox with keep-id) already hold the
+# whole /etc/subuid range. The models must be o+r.
+UserNS=nomap
+
+PidsLimit=1024
+# Host IPC: with its own IPC namespace flash_serve 0.18.16 segfaults while preparing the weights
+# (tested: ShmSize 16g/100g, exec /dev/shm, kernel.shm* sysctls). With UserNS=nomap it cannot
+# reach your session's IPC/shm objects.
+# Observed peak with Qwen: 73G. The NPU models above add up to ~15G pinned.
+PodmanArgs=--memory=104g --ipc=host
+
+[Service]
+# The NPU pins ~12 GiB; needs unlimited memlock on user@.service (host/halogen-host-setup.sh)
+LimitMEMLOCK=infinity
+Restart=on-failure
+TimeoutStartSec=900
+# The server waits up to 60 s for in-flight requests to finish
+TimeoutStopSec=90
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,3 @@
+# Regular network, used only by the proxy to publish the port on the host
+[Network]
+NetworkName=halogen-ext

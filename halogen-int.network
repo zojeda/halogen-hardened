@@ -1,0 +1,4 @@
+# Internal network with no egress: the halogen containers only see each other and the proxy
+[Network]
+NetworkName=halogen-int
+Internal=true
